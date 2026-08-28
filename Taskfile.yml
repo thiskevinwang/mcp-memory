@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3"
+
+vars:
+  GREETING: Hello, world!
+
+tasks:
+  default:
+    desc: Print a greeting message
+    cmds:
+      - echo "{{.GREETING}}"
+    silent: true
+  dev:
+    desc: Start the development server
+    cmds:
+      - bun run dev
+    silent: true
+  inspector:
+    desc: Start the inspector for debugging
+    cmds:
+      - bunx @modelcontextprotocol/inspector --url http://localhost:8787/mcp

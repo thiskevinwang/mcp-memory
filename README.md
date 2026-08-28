@@ -1,4 +1,4 @@
-# Clerk-protected MCP server
+# mcp-memory
 
 This MCP 2.0 Streamable HTTP server is a Clerk OAuth protected resource.
 
@@ -11,12 +11,12 @@ Enable Dynamic Client Registration for MCP clients that need it. Set `users:read
 
 ## Configure the server
 
-Create a local `.env` file. Do not commit this file.
+Create a local `.dev.vars` file. Do not commit this file. Wrangler loads this
+file during `bun run dev`.
 
 ```sh
 CLERK_ISSUER=https://your-instance.clerk.accounts.dev
-MCP_RESOURCE_URL=http://localhost:3000/mcp
-MCP_PORT=3000
+MCP_RESOURCE_URL=http://localhost:8787/mcp
 
 # Required only when Clerk issues opaque OAuth access tokens.
 CLERK_OAUTH_CLIENT_ID=your-resource-server-client-id
@@ -36,7 +36,24 @@ bun run typecheck
 The public OAuth metadata endpoint is:
 
 ```text
-http://localhost:3000/.well-known/oauth-protected-resource/mcp
+http://localhost:8787/.well-known/oauth-protected-resource/mcp
 ```
 
-The MCP client uses `http://localhost:3000/mcp`. This local URL works only when the client and server run on the same computer.
+The MCP client uses `http://localhost:8787/mcp`. This local URL works only when the client and server run on the same computer.
+
+## Deploy
+
+Set each required value as a Worker secret before deployment. Do not put secret
+values in `wrangler.jsonc`.
+
+```sh
+bunx wrangler secret put CLERK_ISSUER
+bunx wrangler secret put MCP_RESOURCE_URL
+bunx wrangler secret put CLERK_SECRET_KEY
+bunx wrangler secret put CLERK_OAUTH_CLIENT_ID
+bunx wrangler secret put CLERK_OAUTH_CLIENT_SECRET
+bun run deploy
+```
+
+Set `MCP_RESOURCE_URL` to the final public HTTPS URL ending in `/mcp`. The
+value must match the `aud` claim in Clerk JWT access tokens.

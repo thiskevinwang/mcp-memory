@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mcp-memory",
+  "main": "index.ts",
+  "compatibility_date": "2026-08-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "secrets": {
+    "required": [
+      "CLERK_ISSUER",
+      "MCP_RESOURCE_URL",
+      "CLERK_SECRET_KEY",
+      "CLERK_OAUTH_CLIENT_ID",
+      "CLERK_OAUTH_CLIENT_SECRET"
+    ]
+  }
+}

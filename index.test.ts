@@ -31,11 +31,11 @@ describe("OAuth protected resource metadata", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect<unknown>(await response.json()).toEqual({
       resource: "http://localhost:3000/mcp",
       authorization_servers: ["https://clerk.clerk.com"],
       bearer_methods_supported: ["header"],
-      scopes_supported: ["users:read", "users:create"],
+      scopes_supported: ["users:read", "users:write"],
     });
   });
 });
@@ -97,6 +97,7 @@ describe("Clerk token verifier", () => {
     const verifier = createClerkTokenVerifier({
       issuer,
       resourceUrl: "http://localhost:3000/mcp",
+      secretKey: "sk_test_example",
       fetch: async () => Response.json({ keys: [{ ...jwk, kid: "test-key" }] }),
     });
 
@@ -123,25 +124,25 @@ describe("Clerk token verifier", () => {
         return Response.json({
           active: true,
           client_id: "dynamic-client",
-          exp: 4_102_444_800,
-          resource: "http://localhost:3000/mcp",
+          iat: 1_787_890_333,
           scope: "users:read users:create",
           sub: "user_123",
         });
       },
     });
 
-    await expect(verifier.verifyAccessToken("opaque-token")).resolves.toEqual({
+    const authInfo = await verifier.verifyAccessToken("opaque-token");
+    expect(authInfo).toMatchObject({
       token: "opaque-token",
       clientId: "dynamic-client",
       scopes: ["users:read", "users:create"],
-      expiresAt: 4_102_444_800,
       resource: new URL("http://localhost:3000/mcp"),
       extra: { userId: "user_123" },
     });
+    expect(authInfo.expiresAt).toBeGreaterThan(Date.now() / 1000);
   });
 
-  test("rejects a JWT for a different resource", async () => {
+  test("does not use the MCP resource URL as a JWT audience", async () => {
     const issuer = "https://clerk.clerk.com";
     const { privateKey, publicKey } = await generateKeyPair("RS256");
     const jwk = await exportJWK(publicKey);
@@ -161,8 +162,66 @@ describe("Clerk token verifier", () => {
       fetch: async () => Response.json({ keys: [{ ...jwk, kid: "test-key" }] }),
     });
 
-    await expect(verifier.verifyAccessToken(token)).rejects.toThrow(
-      "Invalid Clerk JWT access token",
+    await expect(verifier.verifyAccessToken(token)).resolves.toMatchObject({
+      token,
+      clientId: "dynamic-client",
+    });
+  });
+
+  test("verifies an opaque token with the Clerk Backend API", async () => {
+    const verifier = createClerkTokenVerifier({
+      issuer: "https://clerk.clerk.com",
+      resourceUrl: "http://localhost:3000/mcp",
+      secretKey: "sk_test_example",
+      fetch: async (input, init) => {
+        expect(input).toBe(
+          "https://api.clerk.com/oauth_applications/access_tokens/verify",
+        );
+        expect(init).toMatchObject({
+          method: "POST",
+          headers: {
+            Authorization: "Bearer sk_test_example",
+            "Content-Type": "application/json",
+          },
+        });
+        expect(init?.body).toBe(
+          JSON.stringify({ access_token: "opaque-token" }),
+        );
+        return Response.json({
+          object: "oauth_access_token",
+          id: "oat_123",
+          client_id: "dynamic-client",
+          subject: "user_123",
+          scopes: ["users:read", "users:create"],
+          revoked: false,
+          expired: false,
+          expiration: 4_102_444_800,
+          created_at: 1_787_890_333,
+          updated_at: 1_787_890_333,
+        });
+      },
+    });
+
+    await expect(verifier.verifyAccessToken("opaque-token")).resolves.toEqual({
+      token: "opaque-token",
+      clientId: "dynamic-client",
+      scopes: ["users:read", "users:create"],
+      expiresAt: 4_102_444_800,
+      resource: new URL("http://localhost:3000/mcp"),
+      extra: { userId: "user_123" },
+    });
+  });
+
+  test("rejects an inactive Clerk Backend API token", async () => {
+    const verifier = createClerkTokenVerifier({
+      issuer: "https://clerk.clerk.com",
+      resourceUrl: "http://localhost:3000/mcp",
+      secretKey: "sk_test_example",
+      fetch: async () => Response.json({ active: false }),
+    });
+
+    await expect(verifier.verifyAccessToken("opaque-token")).rejects.toThrow(
+      "Inactive Clerk opaque access token",
     );
   });
 
