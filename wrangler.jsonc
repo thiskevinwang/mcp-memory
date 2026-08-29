@@ -9,7 +9,7 @@
     "head_sampling_rate": 1
   },
   "vars": {
-    "ALLOWED_EMAIL": "kwangsan@gmail.com",
+    "ALLOWED_USER_ID": "user_2WmGvirCeic7h9XFQznaJXB4gkr",
     "ALLOWED_HOSTS": "mcp-memory.thekevinwang.workers.dev,localhost,127.0.0.1",
     "MCP_RESOURCE_URL": "https://mcp-memory.thekevinwang.workers.dev/mcp",
     "CLERK_ISSUER": "https://clerk.thekevinwang.com"

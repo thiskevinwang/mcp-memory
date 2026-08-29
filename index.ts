@@ -12,6 +12,8 @@ import {
   configure,
   defaultConsoleFormatter,
   getConsoleSink,
+  getJsonLinesFormatter,
+  getLogger,
   type LogRecord,
 } from "@logtape/logtape";
 import { honoLogger } from "@logtape/hono";
@@ -25,6 +27,14 @@ import {
 } from "./memory-store";
 
 const clerkAuthLoggerCategory = ["hono", "auth", "clerk"];
+const mcpAuthLogger = getLogger(["hono", "auth", "mcp"]);
+
+function isCloudflareWorkerRuntime() {
+  return (
+    typeof navigator !== "undefined" &&
+    navigator.userAgent === "Cloudflare-Workers"
+  );
+}
 
 function formatConsoleLog(record: LogRecord) {
   const formatted = defaultConsoleFormatter(record);
@@ -35,7 +45,13 @@ function formatConsoleLog(record: LogRecord) {
 }
 
 await configure({
-  sinks: { console: getConsoleSink({ formatter: formatConsoleLog }) },
+  sinks: {
+    console: getConsoleSink({
+      formatter: isCloudflareWorkerRuntime()
+        ? getJsonLinesFormatter({ properties: "flatten" })
+        : formatConsoleLog,
+    }),
+  },
   loggers: [
     {
       category: ["logtape", "meta"],
@@ -50,7 +66,7 @@ const supportedScopes = ["users:read", "users:write"];
 
 export interface McpAppConfig {
   clerkIssuer: string;
-  allowedEmail: string;
+  allowedUserId: string;
   opaqueTokenClientId?: string;
   opaqueTokenClientSecret?: string;
   secretKey?: string;
@@ -104,18 +120,54 @@ export function createProtectedMcpApp(config: McpAppConfig) {
     }),
   );
   app.all("/mcp", async (c: Context) => {
+    const parsedBody = c.get("parsedBody");
+    const requestContext = {
+      path: c.req.path,
+      method: c.req.method,
+      host: c.req.header("host") ?? null,
+      origin: c.req.header("origin") ?? null,
+      mcpProtocolVersion: c.req.header("mcp-protocol-version") ?? null,
+      jsonrpcMethod:
+        parsedBody &&
+        typeof parsedBody === "object" &&
+        "method" in parsedBody &&
+        typeof parsedBody.method === "string"
+          ? parsedBody.method
+          : null,
+    };
+
     const authInfo = await gate(c.req.raw);
     if (authInfo instanceof Response) {
+      mcpAuthLogger.warn("mcp_auth_rejected", {
+        ...requestContext,
+        status: authInfo.status,
+        wwwAuthenticate: authInfo.headers.get("WWW-Authenticate"),
+      });
       return authInfo;
     }
 
-    if (authInfo.extra?.email !== config.allowedEmail) {
+    const tokenUserId =
+      typeof authInfo.extra?.userId === "string" ? authInfo.extra.userId : null;
+    if (tokenUserId !== config.allowedUserId) {
+      mcpAuthLogger.warn("mcp_user_forbidden", {
+        ...requestContext,
+        allowedUserId: config.allowedUserId,
+        tokenUserId,
+        clientId: authInfo.clientId,
+        scopes: authInfo.scopes,
+      });
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    mcpAuthLogger.info("mcp_request_authorized", {
+      ...requestContext,
+      userId: tokenUserId,
+      clientId: authInfo.clientId,
+    });
+
     return handler.fetch(c.req.raw, {
       authInfo,
-      parsedBody: c.get("parsedBody"),
+      parsedBody,
     });
   });
 
@@ -223,7 +275,7 @@ function createWorkerApp(env: Env) {
     opaqueTokenClientId: env.CLERK_OAUTH_CLIENT_ID,
     opaqueTokenClientSecret: env.CLERK_OAUTH_CLIENT_SECRET,
     secretKey: env.CLERK_SECRET_KEY,
-    allowedEmail: env.ALLOWED_EMAIL,
+    allowedUserId: env.ALLOWED_USER_ID,
     resourceUrl: env.MCP_RESOURCE_URL,
     allowedHosts: env.ALLOWED_HOSTS.split(",").map((host) => host.trim()),
     memoryStore: createCloudflareMemoryStore(env.AI, env.MEMORIES),

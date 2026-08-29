@@ -6,13 +6,13 @@ import type { MemoryStore } from "./memory-store";
 
 const app = createProtectedMcpApp({
   clerkIssuer: "https://clerk.clerk.com",
-  allowedEmail: "kwangsan@gmail.com",
+  allowedUserId: "user_123",
   resourceUrl: "http://localhost:3000/mcp",
 });
 
 const appWithTokenWithoutScopes = createProtectedMcpApp({
   clerkIssuer: "https://clerk.clerk.com",
-  allowedEmail: "kwangsan@gmail.com",
+  allowedUserId: "user_123",
   resourceUrl: "http://localhost:3000/mcp",
   tokenVerifier: {
     async verifyAccessToken(token) {
@@ -55,7 +55,7 @@ const memoryStore: MemoryStore = {
 };
 const appWithMemoryTools = createProtectedMcpApp({
   clerkIssuer: "https://clerk.clerk.com",
-  allowedEmail: "kwangsan@gmail.com",
+  allowedUserId: "user_123",
   resourceUrl: "http://localhost:3000/mcp",
   memoryStore,
   tokenVerifier: {
@@ -76,9 +76,9 @@ const appWithMemoryTools = createProtectedMcpApp({
     },
   },
 });
-const appWithUnauthorizedEmail = createProtectedMcpApp({
+const appWithUnauthorizedUser = createProtectedMcpApp({
   clerkIssuer: "https://clerk.clerk.com",
-  allowedEmail: "kwangsan@gmail.com",
+  allowedUserId: "user_123",
   resourceUrl: "http://localhost:3000/mcp",
   memoryStore,
   tokenVerifier: {
@@ -172,7 +172,7 @@ describe("MCP bearer authentication", () => {
       .sign(privateKey);
     const jwtProtectedApp = createProtectedMcpApp({
       clerkIssuer: issuer,
-      allowedEmail: "kwangsan@gmail.com",
+      allowedUserId: "user_123",
       resourceUrl: "http://localhost:3000/mcp",
       memoryStore,
       tokenVerifier: createClerkTokenVerifier({
@@ -266,9 +266,9 @@ describe("MCP bearer authentication", () => {
     expect(await response.text()).toContain("The launch date is October 4.");
   });
 
-  test("rejects an authenticated user with a different email", async () => {
+  test("rejects an authenticated user with a different Clerk user ID", async () => {
     persistedMemoryCalls.length = 0;
-    const response = await appWithUnauthorizedEmail.request(
+    const response = await appWithUnauthorizedUser.request(
       "http://localhost:3000/mcp",
       {
         method: "POST",
