@@ -1,6 +1,0 @@
-interface:
-  display_name: "Run MCP Memory"
-  short_description: "Run MCP Memory with optional remote bindings"
-  default_prompt: "Use $run-mcp-memory to start this project in the correct local binding mode."
-policy:
-  allow_implicit_invocation: true
