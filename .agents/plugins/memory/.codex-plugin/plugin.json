@@ -1,0 +1,23 @@
+{
+  "name": "memory",
+  "version": "0.1.0",
+  "description": "Recall and save user-specific memories through the mcp-memory server.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Memory",
+    "shortDescription": "Recall and save useful memories.",
+    "longDescription": "Memory connects Codex to the authenticated mcp-memory server. Use recall to find relevant context and remember to save durable user preferences, decisions, and facts.",
+    "developerName": "mcp-memory",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": [
+      "Recall relevant context for this task.",
+      "Remember this decision for later.",
+      "What do you remember about this project?"
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}
