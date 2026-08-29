@@ -223,6 +223,17 @@ async function verifyJwtAccessToken(
       issuer,
     });
 
+    logger.info("clerk_jwt_claims", {
+      issuer,
+      claimKeys: Object.keys(payload),
+      hasEmailClaim: typeof payload.email === "string",
+      email:
+        typeof payload.email === "string" ? payload.email : null,
+      sub: typeof payload.sub === "string" ? payload.sub : null,
+      azp: typeof payload.azp === "string" ? payload.azp : null,
+      scope: typeof payload.scope === "string" ? payload.scope : null,
+    });
+
     const authInfo = toAuthInfo(token, payload, resourceUrl);
     logVerifiedToken("JWT", issuer, authInfo);
     return authInfo;
@@ -435,6 +446,10 @@ function logVerifiedToken(
     clientId: authInfo.clientId,
     scopes: authInfo.scopes,
     expiresAt: authInfo.expiresAt,
+    userId: authInfo.extra?.userId ?? null,
+    hasEmailClaim: typeof authInfo.extra?.email === "string",
+    email:
+      typeof authInfo.extra?.email === "string" ? authInfo.extra.email : null,
   });
 }
 
