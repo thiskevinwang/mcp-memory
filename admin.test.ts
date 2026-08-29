@@ -21,7 +21,7 @@ const memoryStore: AdminMemoryStore = {
           text: "Use <strong>escaped</strong> text",
           createdAt: "2026-08-29T12:00:00.000Z",
           updatedAt: "2026-08-29T12:00:00.000Z",
-          relevance: null,
+          relevance: 64,
         },
       ],
       page: 1,
@@ -112,6 +112,22 @@ describe("admin OAuth and session", () => {
     const body = await admin.text();
     expect(body).toContain("Use &lt;strong&gt;escaped&lt;/strong&gt; text");
     expect(body).not.toContain("Use <strong>escaped</strong> text");
+    expect(body).toContain('data-slot="table"');
+    expect(body).toContain('data-slot="button"');
+
+    const textInput = body.match(
+      /<textarea[^>]*name="text"[^>]*>.*?<\/textarea>/s,
+    )?.[0];
+    expect(textInput).toBeDefined();
+    expect(textInput).not.toContain("Use &lt;strong&gt;");
+
+    for (const name of ["search", "filter", "relevance"]) {
+      const input = body.match(
+        new RegExp(`<input[^>]*name="${name}"[^>]*>`),
+      )?.[0];
+      expect(input).toBeDefined();
+      expect(input).not.toContain("value=");
+    }
     expect(calls).toEqual(["list:user_123:1"]);
 
     const crossOriginPost = await app.request(

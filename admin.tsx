@@ -1,11 +1,42 @@
 import type { OAuthTokenVerifier } from "@modelcontextprotocol/server";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Database,
+  ListFilter,
+  Save,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { timingSafeEqual } from "node:crypto";
+import { renderToStaticMarkup } from "react-dom/server";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
-import { html } from "hono/html";
 
+import adminStyles from "./admin.generated.txt";
 import { createClerkTokenVerifier } from "./clerk-token-verifier";
+import { Badge } from "./components/ui/badge";
+import { Button, buttonVariants } from "./components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./components/ui/card";
+import { Input } from "./components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./components/ui/table";
+import { Textarea } from "./components/ui/textarea";
+import { cn } from "./lib/utils";
 import {
   MAX_MEMORY_TEXT_LENGTH,
   type AdminMemory,
@@ -386,7 +417,7 @@ function fromBase64Url(value: string) {
   return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
 }
 
-interface AdminPageOptions {
+export interface AdminPageOptions {
   memories: AdminMemory[];
   page: number;
   hasNextPage: boolean;
@@ -394,166 +425,309 @@ interface AdminPageOptions {
   filter: string;
 }
 
-function renderAdminPage(options: AdminPageOptions) {
-  const previousUrl = listUrl(options.page - 1, options.filter);
-  const nextUrl = listUrl(options.page + 1, options.filter);
-  return html`<!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Memory admin</title>
-        <style>
-          :root {
-            color-scheme: light dark;
-            font-family: system-ui, sans-serif;
-          }
-          body {
-            margin: 0 auto;
-            max-width: 72rem;
-            padding: 2rem 1rem 5rem;
-          }
-          h1 {
-            margin-bottom: 0.25rem;
-          }
-          .tools,
-          .memory {
-            border: 1px solid #8886;
-            border-radius: 0.75rem;
-            padding: 1rem;
-          }
-          .tools {
-            display: grid;
-            gap: 0.75rem;
-            margin: 1.5rem 0;
-          }
-          .tools form,
-          .row {
-            display: flex;
-            gap: 0.5rem;
-            align-items: end;
-          }
-          .memories {
-            display: grid;
-            gap: 1rem;
-          }
-          .memory textarea {
-            box-sizing: border-box;
-            min-height: 6rem;
-            width: 100%;
-          }
-          .memory form {
-            margin-top: 0.75rem;
-          }
-          .meta {
-            color: #777;
-            font-size: 0.85rem;
-            overflow-wrap: anywhere;
-          }
-          input,
-          textarea,
-          button {
-            font: inherit;
-            padding: 0.5rem;
-          }
-          input[type="search"] {
-            flex: 1;
-          }
-          button.danger {
-            color: #b42318;
-          }
-          nav {
-            display: flex;
-            gap: 1rem;
-            margin-top: 1.5rem;
-          }
-          label {
-            display: grid;
-            gap: 0.25rem;
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Memory admin</h1>
-        <div class="meta">D1 catalog · Vectorize similarity</div>
-        <section class="tools" aria-label="Memory searches">
-          <form method="get" action="/admin">
-            <label
-              >Vector search
-              <input
-                type="search"
-                name="search"
-                value=${options.search}
-                maxlength=${MAX_MEMORY_TEXT_LENGTH}
-              />
-            </label>
-            <button type="submit">Search</button>
-          </form>
-          <form method="get" action="/admin">
-            <label
-              >Text filter
-              <input
-                type="search"
-                name="filter"
-                value=${options.filter}
-                maxlength=${MAX_MEMORY_TEXT_LENGTH}
-              />
-            </label>
-            <button type="submit">Filter</button>
-          </form>
-        </section>
-        <p>${options.memories.length} memories shown</p>
-        <main class="memories">${options.memories.map(renderMemory)}</main>
-        ${
-          options.search
-            ? html`<nav><a href="/admin">Back to catalog</a></nav>`
-            : html`<nav>
-                ${
-                  options.page > 1
-                    ? html`<a href=${previousUrl}>Previous</a>`
-                    : ""
-                }
-                <span>Page ${options.page}</span>
-                ${options.hasNextPage ? html`<a href=${nextUrl}>Next</a>` : ""}
-              </nav>`
-        }
-      </body>
-    </html>`;
+export function renderAdminPage(options: AdminPageOptions) {
+  return `<!doctype html>${renderToStaticMarkup(
+    <AdminDocument options={options} />,
+  )}`;
 }
 
-function renderMemory(memory: AdminMemory) {
-  const pathId = encodeURIComponent(memory.id);
-  return html`<article class="memory">
-    <div class="meta">
-      ${memory.id} · created ${memory.createdAt} · updated ${memory.updatedAt}
-      ${memory.score === undefined ? "" : ` · cosine ${memory.score.toFixed(4)}`}
-    </div>
-    <form method="post" action=${`/admin/${pathId}/text`}>
-      <label
-        >Text
-        <textarea name="text" maxlength=${MAX_MEMORY_TEXT_LENGTH} required>
-${memory.text}</textarea>
+function AdminDocument({ options }: { options: AdminPageOptions }) {
+  const resultLabel = options.search
+    ? `Vector results for “${options.search}”`
+    : options.filter
+      ? `Filtered by “${options.filter}”`
+      : "Full catalog";
+
+  return (
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="color-scheme" content="light" />
+        <title>Memory admin</title>
+        <style dangerouslySetInnerHTML={{ __html: adminStyles }} />
+      </head>
+      <body className="min-h-screen bg-[radial-gradient(circle_at_top_left,oklch(0.93_0.05_255),transparent_36rem)]">
+        <main className="mx-auto flex max-w-[100rem] flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+          <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+            <div>
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium text-primary">
+                <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+                  <Database aria-hidden="true" className="size-4" />
+                </span>
+                D1 catalog · Vectorize similarity
+              </div>
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                Memory admin
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm text-muted-foreground sm:text-base">
+                Search, inspect, and update stored memories from one table.
+              </p>
+            </div>
+            <Badge variant="secondary" className="h-7 px-3">
+              {options.memories.length} shown
+            </Badge>
+          </header>
+
+          <Card aria-label="Memory searches">
+            <CardHeader>
+              <CardTitle>Find memories</CardTitle>
+              <CardDescription>
+                Inputs start blank. Active query: {resultLabel}.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 lg:grid-cols-2">
+              <SearchForm
+                label="Vector search"
+                name="search"
+                placeholder="Search by meaning…"
+                icon={<Search aria-hidden="true" />}
+                buttonText="Search"
+              />
+              <SearchForm
+                label="Text filter"
+                name="filter"
+                placeholder="Filter memory text…"
+                icon={<ListFilter aria-hidden="true" />}
+                buttonText="Filter"
+              />
+            </CardContent>
+          </Card>
+
+          <Card className="gap-0 overflow-hidden py-0">
+            <MemoryTable memories={options.memories} />
+          </Card>
+
+          <Pagination options={options} />
+        </main>
+      </body>
+    </html>
+  );
+}
+
+function SearchForm({
+  label,
+  name,
+  placeholder,
+  icon,
+  buttonText,
+}: {
+  label: string;
+  name: "search" | "filter";
+  placeholder: string;
+  icon: React.ReactNode;
+  buttonText: string;
+}) {
+  return (
+    <form method="get" action="/admin" className="grid gap-2">
+      <label htmlFor={name} className="text-sm font-medium">
+        {label}
       </label>
-      <button type="submit">Save text</button>
-    </form>
-    <form class="row" method="post" action=${`/admin/${pathId}/relevance`}>
-      <label
-        >Relevance (optional, 0–100)
-        <input
-          type="number"
-          name="relevance"
-          min="0"
-          max="100"
-          step="1"
-          value=${memory.relevance ?? ""}
+      <div className="flex gap-2">
+        <Input
+          id={name}
+          type="search"
+          name={name}
+          placeholder={placeholder}
+          maxLength={MAX_MEMORY_TEXT_LENGTH}
+          autoComplete="off"
         />
-      </label>
-      <button type="submit">Save relevance</button>
+        <Button type="submit">
+          {icon}
+          {buttonText}
+        </Button>
+      </div>
     </form>
-    <form method="post" action=${`/admin/${pathId}/delete`}>
-      <button class="danger" type="submit">Delete</button>
-    </form>
-  </article>`;
+  );
+}
+
+function MemoryTable({ memories }: { memories: AdminMemory[] }) {
+  return (
+    <Table className="min-w-[88rem]">
+      <TableCaption className="sr-only">
+        Stored memories and edit controls
+      </TableCaption>
+      <TableHeader className="bg-muted/60">
+        <TableRow className="hover:bg-muted/60">
+          <TableHead className="w-[28rem] pl-6">Memory</TableHead>
+          <TableHead>Relevance</TableHead>
+          <TableHead>Similarity</TableHead>
+          <TableHead>Created</TableHead>
+          <TableHead>Updated</TableHead>
+          <TableHead className="w-80">Replace text</TableHead>
+          <TableHead className="w-56">Set relevance</TableHead>
+          <TableHead className="pr-6 text-right">Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {memories.length === 0 ? (
+          <TableRow>
+            <TableCell colSpan={8} className="h-40 text-center">
+              <div className="mx-auto grid max-w-sm gap-2 text-muted-foreground">
+                <Database aria-hidden="true" className="mx-auto size-6" />
+                <p className="font-medium text-foreground">No memories found</p>
+                <p>Change the search or return to the full catalog.</p>
+              </div>
+            </TableCell>
+          </TableRow>
+        ) : (
+          memories.map((memory) => <MemoryRow key={memory.id} memory={memory} />)
+        )}
+      </TableBody>
+    </Table>
+  );
+}
+
+function MemoryRow({ memory }: { memory: AdminMemory }) {
+  const pathId = encodeURIComponent(memory.id);
+  const textInputId = `text-${memory.id}`;
+  const relevanceInputId = `relevance-${memory.id}`;
+
+  return (
+    <TableRow>
+      <TableCell className="pl-6">
+        <p className="max-w-md whitespace-pre-wrap break-words leading-6">
+          {memory.text}
+        </p>
+        <p className="mt-2 max-w-md break-all font-mono text-[0.7rem] text-muted-foreground">
+          {memory.id}
+        </p>
+      </TableCell>
+      <TableCell>
+        <Badge variant={memory.relevance === null ? "outline" : "secondary"}>
+          {memory.relevance === null ? "Unranked" : memory.relevance}
+        </Badge>
+      </TableCell>
+      <TableCell className="font-mono text-xs text-muted-foreground">
+        {memory.score === undefined ? "—" : memory.score.toFixed(4)}
+      </TableCell>
+      <DateCell value={memory.createdAt} />
+      <DateCell value={memory.updatedAt} />
+      <TableCell>
+        <form
+          method="post"
+          action={`/admin/${pathId}/text`}
+          className="grid min-w-72 gap-2"
+        >
+          <label htmlFor={textInputId} className="sr-only">
+            Replacement text for {memory.id}
+          </label>
+          <Textarea
+            id={textInputId}
+            name="text"
+            placeholder="Enter replacement text…"
+            maxLength={MAX_MEMORY_TEXT_LENGTH}
+            required
+            className="min-h-20 resize-y"
+          />
+          <Button type="submit" size="sm" variant="outline">
+            <Save aria-hidden="true" />
+            Save text
+          </Button>
+        </form>
+      </TableCell>
+      <TableCell>
+        <form
+          method="post"
+          action={`/admin/${pathId}/relevance`}
+          className="grid min-w-48 gap-2"
+        >
+          <label htmlFor={relevanceInputId} className="sr-only">
+            Relevance for {memory.id}
+          </label>
+          <Input
+            id={relevanceInputId}
+            type="number"
+            name="relevance"
+            min={0}
+            max={100}
+            step={1}
+            placeholder="0–100"
+          />
+          <Button type="submit" size="sm" variant="outline">
+            <Save aria-hidden="true" />
+            Save relevance
+          </Button>
+        </form>
+      </TableCell>
+      <TableCell className="pr-6 text-right">
+        <form method="post" action={`/admin/${pathId}/delete`}>
+          <Button type="submit" size="sm" variant="destructive">
+            <Trash2 aria-hidden="true" />
+            Delete
+          </Button>
+        </form>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function DateCell({ value }: { value: string }) {
+  return (
+    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+      <time dateTime={value} title={value}>
+        {formatDate(value)}
+      </time>
+    </TableCell>
+  );
+}
+
+function Pagination({ options }: { options: AdminPageOptions }) {
+  if (options.search) {
+    return (
+      <nav aria-label="Memory pagination">
+        <a href="/admin" className={buttonVariants({ variant: "outline" })}>
+          <ChevronLeft aria-hidden="true" />
+          Back to catalog
+        </a>
+      </nav>
+    );
+  }
+
+  return (
+    <nav
+      aria-label="Memory pagination"
+      className="flex items-center justify-between gap-4"
+    >
+      <a
+        href={listUrl(options.page - 1, options.filter)}
+        aria-disabled={options.page <= 1}
+        tabIndex={options.page <= 1 ? -1 : undefined}
+        className={cn(
+          buttonVariants({ variant: "outline" }),
+          options.page <= 1 && "pointer-events-none opacity-50",
+        )}
+      >
+        <ChevronLeft aria-hidden="true" />
+        Previous
+      </a>
+      <span className="text-sm font-medium text-muted-foreground">
+        Page {options.page}
+      </span>
+      <a
+        href={listUrl(options.page + 1, options.filter)}
+        aria-disabled={!options.hasNextPage}
+        tabIndex={!options.hasNextPage ? -1 : undefined}
+        className={cn(
+          buttonVariants({ variant: "outline" }),
+          !options.hasNextPage && "pointer-events-none opacity-50",
+        )}
+      >
+        Next
+        <ChevronRight aria-hidden="true" />
+      </a>
+    </nav>
+  );
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(date);
 }
 
 function listUrl(page: number, filter: string) {
