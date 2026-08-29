@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workers Best Practices Review</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+<style>
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 1.05rem; margin: 1.8rem 0 0.4rem; }
+</style>
+</head>
+<body>
+<main>
+["markdown", "reviews/2026-09-01-workers-best-practices.md"]
+<h1 id='workers_best_practices_review_—_mcp-memory'>Workers Best Practices Review — mcp-memory</h1>
+
+<p><strong>Sources retrieved:</strong> <a href='https://developers.cloudflare.com/workers/best-practices/workers-best-practices/'>Workers Best Practices</a> (updated 2026-08-20), local <code>wrangler/config-schema.json</code> (wrangler 4.127.1), <code>@cloudflare/workers-types</code> — local 5.20260828.1 is <em>newer</em> than npm latest (5.20260822.1), so local types win.</p>
+
+<p><strong>Validation:</strong> <code>tsc --noEmit</code> ✅ clean · <code>wrangler deploy --dry-run</code> ✅ bindings resolve</p>
+
+<h2 id='findings'>Findings</h2>
+
+<h3 id='[high]_jwt_audience_validation_is_commented_out'>[HIGH] JWT audience validation is commented out</h3>
+
+<p><code>clerk-token-verifier.ts:222</code> — <code>// audience: resourceUrl.href,</code> inside <code>jwtVerify</code>. Without audience/resource checks, a token minted for <em>any</em> Clerk application is accepted by this server (token-reuse across resources). The opaque-token resource check at <code>clerk-token-verifier.ts:299–306</code> is commented out too, and <code>toAuthInfo</code> synthesizes a fake 8-hour <code>expiresAt</code> (line 343) because introspection doesn&#8217;t return one. MCP&#8217;s auth spec expects resource-scoped tokens (<a href='https://modelcontextprotocol.io/specification/draft/basic/authorization'>MCP authorization</a>).</p>
+
+<p><strong>Fix:</strong> re-enable <code>audience: resourceUrl.href</code> once Clerk issues resource-indicator tokens for this server; if Clerk can&#8217;t, document why and track it — don&#8217;t leave it silent.</p>
+
+<h3 id='[medium]_authorization_policy_hardcoded_in_source'>[MEDIUM] Authorization policy hardcoded in source</h3>
+
+<p><code>index.ts:50</code> — <code>const ALLOWED_EMAIL = &quot;kwangsan@gmail.com&quot;;</code>. Not a secret leak, but it means changing the allowlist requires a deploy, and it&#8217;s a personal email in version control.</p>
+
+<p><strong>Fix:</strong> move to a <code>vars</code> entry (e.g. <code>ALLOWED_EMAILS</code>) — it&#8217;s non-secret config, so <code>vars</code> in <code>wrangler.jsonc</code> is fine.</p>
+
+<h3 id='[medium]_jwks_set_re-created_on_every_token_verification'>[MEDIUM] JWKS set re-created on every token verification</h3>
+
+<p><code>clerk-token-verifier.ts:56</code> — <code>createRemoteJWKSet(...)</code> is called <em>inside</em> <code>verifyAccessToken</code>. jose caches fetched JWKS <strong>per instance</strong>, so this refetches Clerk&#8217;s keys on every request — needless latency on the auth hot path, and a Clerk JWKS outage would instantly break all auth.</p>
+
+<p><strong>Fix:</strong> hoist it to module level (or memoize per issuer). Safe here — it&#8217;s config, not request-scoped state.</p>
+
+<h3 id='[low]_full_introspection_result_logged'>[LOW] Full introspection result logged</h3>
+
+<p><code>clerk-token-verifier.ts:295</code> — <code>clerk_opaque_introspection_result</code> logs the entire Clerk response (<code>sub</code>, <code>scope</code>, <code>client_id</code>…). <code>formatConsoleLog</code> in <code>index.ts</code> additionally appends properties (including email) for all Clerk auth logs. With <code>head_sampling_rate: 1</code>, this PII lands in Workers Logs at full volume.</p>
+
+<p><strong>Fix:</strong> log selected fields, as <code>logVerifiedToken</code> already does.</p>
+
+<h3 id='[low]_head_sampling_rate:_1_in_committed_config'>[LOW] <code>head_sampling_rate: 1</code> in committed config</h3>
+
+<p><code>wrangler.jsonc:11</code> — fine while developing, but 100% head-based sampling is expensive/noisy at production scale. Revisit when you add environments.</p>
+
+<h3 id='[low]_tests_run_under_bun_test_,_not_the_workers_runtime'>[LOW] Tests run under <code>bun test</code>, not the Workers runtime</h3>
+
+<p><code>package.json</code> — the DI-based tests are good, but the canonical setup is <a href='https://developers.cloudflare.com/workers/testing/vitest-integration/'>`@cloudflare/vitest-plugin`</a>, which runs tests <em>inside workerd</em> and catches runtime/compat differences bun won&#8217;t. Worth migrating before the cross-user work adds isolation-critical tests.</p>
+
+<h2 id='verified_clean_✅'>Verified clean ✅</h2>
+
+<ul>
+<li><strong>Config:</strong> recent <code>compatibility_date</code> (2026-08-28), <code>nodejs_compat</code> on, JSONC, secrets via declarative <code>secrets.required</code> (not in source), observability enabled, <code>main</code> present.</li>
+
+<li><strong>Types:</strong> <code>Env</code> generated by <code>wrangler types</code>, <code>satisfies ExportedHandler&lt;Env&gt;</code>, no <code>any</code>/double-casts on handlers, binding names match config exactly (<code>MEMORIES</code>, <code>AI</code>).</li>
+
+<li><strong>Patterns:</strong> no module-level request state (<code>createWorkerApp(env)</code> is per-request), no floating promises (all <code>fetch</code>es awaited), bindings used instead of REST APIs for Vectorize/AI, no <code>passThroughOnException</code>.</li>
+
+<li><strong>Security:</strong> <code>crypto.randomUUID()</code> and <code>crypto.subtle.digest</code> (not <code>Math.random()</code>), unknown JSON validated with type guards (<code>isClerkBackendAccessTokenResponse</code>) rather than asserted.</li>
+
+<li><strong>Streaming:</strong> <code>await response.json()/text()</code> only on Clerk API responses — small and bounded, not user-controlled payloads. No violation.</li>
+</ul>
+
+<h2 id='next_actions'>Next actions</h2>
+
+<ol type="1">
+<li>JWKS caching fix (mechanical, safe to do now).</li>
+
+<li>Audience validation — needs a conversation first: does Clerk issue <code>aud</code> matching your <code>MCP_RESOURCE_URL</code>? It was presumably disabled for a reason.</li>
+</ol>
+
+</main>
+<footer>mcp-memory · reviews/2026-09-01-workers-best-practices.md</footer>
+</body>
+</html>

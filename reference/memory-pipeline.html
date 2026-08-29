@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference — Memory pipeline cheat sheet</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+<style>
+  table { border-collapse: collapse; width: 100%; font-size: 0.95rem; margin: 1rem 0 2rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { border-bottom: 2px solid var(--ink); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Memory pipeline cheat sheet</h1>
+<p class="subtitle">mcp-memory reference · the compressed essence of <a href="../lessons/0001-how-memories-work.html">Lesson 0001</a></p>
+
+<h2>Two MCP tools (<code>index.ts</code>)</h2>
+<table>
+  <tr><th>Tool</th><th>Input</th><th>Output</th><th>Hints</th></tr>
+  <tr>
+    <td><code>remember</code></td>
+    <td><code>text</code> (1–2000 chars)</td>
+    <td><code>{ id, createdAt }</code></td>
+    <td>write, non-idempotent</td>
+  </tr>
+  <tr>
+    <td><code>recall</code></td>
+    <td><code>query</code>, <code>limit</code> (1–20, default 5), <code>maxAgeDays?</code></td>
+    <td><code>{ memories: [{ id, text, createdAt, score }] }</code></td>
+    <td>read-only, idempotent</td>
+  </tr>
+</table>
+
+<h2>Write path (<code>persistMemory</code>)</h2>
+<table>
+  <tr><th>Step</th><th>Detail</th></tr>
+  <tr><td>Validate</td><td>non-empty after trim; ≤ <code>MAX_MEMORY_TEXT_LENGTH</code> = 2000</td></tr>
+  <tr><td>Embed</td><td><code>@cf/qwen/qwen3-embedding-0.6b</code> via <code>env.AI</code>, input <code>{ documents: [text] }</code></td></tr>
+  <tr><td>Namespace</td><td>SHA-256 hex of Clerk user ID (isolation boundary)</td></tr>
+  <tr><td>Upsert</td><td>into <code>env.MEMORIES</code> Vectorize index</td></tr>
+  <tr><td>Metadata</td><td><code>text</code>, <code>createdAt</code> (ISO), <code>createdAtDay</code> (int epoch day)</td></tr>
+</table>
+
+<h2>Read path (<code>recallMemories</code>)</h2>
+<table>
+  <tr><th>Step</th><th>Detail</th></tr>
+  <tr><td>Validate</td><td>query non-empty; limit integer 1–<code>MAX_RECALL_RESULTS</code> = 20</td></tr>
+  <tr><td>Embed</td><td>same model, input <code>{ queries: [text] }</code> (asymmetric!)</td></tr>
+  <tr><td>Query</td><td><code>topK = limit</code>, same namespace, <code>returnValues: false</code>, <code>returnMetadata: "all"</code></td></tr>
+  <tr><td>Age filter</td><td><code>createdAtDay: { $gte: today - maxAgeDays }</code> (metadata pre-filter)</td></tr>
+  <tr><td>Result</td><td><code>text</code>/<code>createdAt</code> from metadata, <code>score</code> = similarity</td></tr>
+</table>
+
+<h2>Invariants to remember</h2>
+<ul>
+  <li><strong>No database.</strong> The source of truth for text is vector metadata.</li>
+  <li><strong>One index, many namespaces.</strong> User isolation = namespace = SHA-256(userId), applied on both write and query.</li>
+  <li><strong>Asymmetric embedding.</strong> <code>documents</code> for storage, <code>queries</code> for search — never interchangeable.</li>
+  <li><strong>Dates twice.</strong> ISO string for display, integer epoch day for <code>$gte</code> filtering.</li>
+  <li>Auth: bearer token via Clerk; only <code>userId</code> from <code>authInfo.extra</code> reaches the store; email allowlist at the HTTP layer.</li>
+</ul>
+
+<h2>Official docs</h2>
+<ul>
+  <li><a href="https://developers.cloudflare.com/vectorize/get-started/embeddings/">Vectorize + Workers AI embeddings</a></li>
+  <li><a href="https://developers.cloudflare.com/workers-ai/models/qwen3-embedding-0.6b/">Qwen3 embedding model schema</a></li>
+  <li><a href="https://developers.cloudflare.com/vectorize/platform/limits/">Vectorize limits</a></li>
+  <li><a href="https://developers.cloudflare.com/vectorize/reference/metadata-filtering/">Metadata filtering</a></li>
+</ul>
+
+</main>
+<footer>mcp-memory learning workspace · Reference · print me</footer>
+</body>
+</html>

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 — How memories work in mcp-memory</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<h1>How memories work in this repo</h1>
+<p class="subtitle">Lesson 0001 · mcp-memory · one memory, from write to recall</p>
+
+<p>This server exposes exactly two memory tools — <code>remember</code> and
+<code>recall</code> (<a href="https://github.com/modelcontextprotocol">MCP</a> tools registered in
+<code>index.ts</code>). There is no database. Every memory is a single vector in a
+<a href="https://developers.cloudflare.com/vectorize/">Cloudflare Vectorize</a> index, and the original
+text rides along <em>inside the vector's metadata</em>. Understanding this one
+pipeline is the foundation for everything else in the repo.</p>
+
+<h2>The write path: <code>remember</code></h2>
+
+<p>When a client calls <code>remember</code> with some text,
+<code>VectorMemoryStore.persistMemory()</code> (<code>memory-store.ts</code>) does three things:</p>
+
+<ol>
+  <li><strong>Validates</strong> the text (non-empty, ≤ 2000 characters).</li>
+  <li><strong>Embeds</strong> it with Workers AI's
+    <a href="https://developers.cloudflare.com/workers-ai/models/qwen3-embedding-0.6b/"><code>@cf/qwen/qwen3-embedding-0.6b</code></a>
+    model, using the <code>{ documents: [text] }</code> input shape.</li>
+  <li><strong>Upserts</strong> one vector into the <code>MEMORIES</code> index.</li>
+</ol>
+
+<pre><code>await index.upsert([{
+  id,            // crypto.randomUUID()
+  values,        // the embedding (a number[])
+  namespace,     // SHA-256 hex of the Clerk user ID
+  metadata: {
+    text,                        // the original memory, in full
+    createdAt:    "2026-…",      // ISO timestamp
+    createdAtDay: 20487          // integer epoch day, for filtering
+  }
+}]);</code></pre>
+
+<div class="callout">
+  <p class="label">Key insight</p>
+  <p><strong>Namespaces are the isolation boundary.</strong> The server hashes the
+  authenticated Clerk user ID with SHA-256 and uses that hex string as the
+  vector's <em>namespace</em>. Vectorize namespaces partition an index, so one
+  user's vectors can never surface in another user's search — enforced at query
+  time, not by application code.
+  (<a href="https://developers.cloudflare.com/vectorize/best-practices/insert-vectors/#namespaces">Vectorize namespaces</a>)</p>
+</div>
+
+<h2>The read path: <code>recall</code></h2>
+
+<p><code>recallMemories()</code> mirrors the write path with two deliberate
+differences:</p>
+
+<ol>
+  <li>The query is embedded with the <code>{ queries: [text] }</code> shape, not
+    <code>documents</code>. The Qwen3 embedding model is
+    <a href="https://developers.cloudflare.com/vectorize/get-started/embeddings/">asymmetric</a>:
+    it produces different (better-matched) vectors depending on which side of a
+    search you're embedding.</li>
+  <li>The query is scoped to the user's namespace and can carry a
+    <strong>metadata filter</strong>: <code>createdAtDay: { $gte: … }</code> implements
+    the <code>maxAgeDays</code> option. This is why the store saves the integer epoch
+    day alongside the ISO string — Vectorize filters compare numbers, not dates.
+    (<a href="https://developers.cloudflare.com/vectorize/reference/metadata-filtering/">Metadata filtering</a>)</li>
+</ol>
+
+<p>Results come back with <code>returnMetadata: "all"</code>, so the text the user
+sees is read straight out of the matched vector's metadata — plus a similarity
+<code>score</code>.</p>
+
+<h2>The whole picture</h2>
+
+<figure>
+<pre><code>remember(text)                     recall(query, limit, maxAgeDays)
+     │                                      │
+     ▼                                      ▼
+embed as "document"                embed as "query"
+     │                                      │
+     ▼                                      ▼
+upsert into MEMORIES ────────────► query MEMORIES
+(namespace = sha256(userId))       (same namespace, topK = limit,
+ metadata: text + dates             optional createdAtDay ≥ cutoff)
+                                            │
+                                            ▼
+                              text, createdAt, score from metadata</code></pre>
+<figcaption>One index, no database. Isolation by hashed namespace; recency by metadata filter.</figcaption>
+</figure>
+
+<h2>Check your recall (from memory, no scrolling up)</h2>
+
+<quiz-block data-explain="There is no D1 or KV here — the original text lives in the vector's metadata, returned with returnMetadata: 'all'.">
+  <p class="q">1. Where is the original memory text stored?</p>
+  <button data-correct>In the vector's metadata</button>
+  <button>In a D1 database</button>
+  <button>In a KV namespace</button>
+</quiz-block>
+
+<quiz-block data-explain="The store hashes the Clerk user ID with SHA-256 and uses it as the Vectorize namespace on both write and query.">
+  <p class="q">2. How are one user's memories isolated from another's?</p>
+  <button>A separate vector index</button>
+  <button data-correct>A hashed user namespace</button>
+  <button>A metadata equality filter</button>
+</quiz-block>
+
+<quiz-block data-explain="persist uses { documents: [...] }; recall uses { queries: [...] }. Qwen3 is an asymmetric embedding model — the input shape tells it which side of the search it's embedding.">
+  <p class="q">3. Which input shape does <code>recall</code> send to the embedding model?</p>
+  <button>The documents input shape</button>
+  <button>The messages input shape</button>
+  <button data-correct>The queries input shape</button>
+</quiz-block>
+
+<h2>Go further</h2>
+
+<p><strong>Primary source:</strong> read the Cloudflare guide
+<a href="https://developers.cloudflare.com/vectorize/get-started/embeddings/">“Vectorize and Workers AI embeddings”</a> —
+it's the official walkthrough of exactly the pattern this repo uses (embed → upsert with namespace →
+query with filter).</p>
+
+<p>When you're ready, the reference sheet <a href="../reference/memory-pipeline.html">Memory pipeline cheat sheet</a>
+compresses this lesson onto one page for quick lookup.</p>
+
+<p>Anything unclear — why epoch days instead of ISO strings, why hashes instead of raw user IDs,
+what the score number means — <strong>ask your agent-teacher</strong>. That's what it's here for.</p>
+
+</main>
+<footer>
+  mcp-memory learning workspace · Lesson 0001 ·
+  Reference: <a href="../reference/memory-pipeline.html">memory pipeline</a>
+</footer>
+</body>
+</html>
