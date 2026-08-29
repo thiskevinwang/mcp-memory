@@ -2,34 +2,44 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "mcp-memory",
   "main": "index.ts",
-  "compatibility_date": "2026-08-28",
+  "compatibility_date": "2026-08-29",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "head_sampling_rate": 1,
   },
   "vars": {
     "ALLOWED_USER_ID": "user_2WmGvirCeic7h9XFQznaJXB4gkr",
     "ALLOWED_HOSTS": "mcp-memory.thekevinwang.workers.dev,localhost,127.0.0.1",
     "MCP_RESOURCE_URL": "https://mcp-memory.thekevinwang.workers.dev/mcp",
-    "CLERK_ISSUER": "https://clerk.thekevinwang.com"
+    "CLERK_ISSUER": "https://clerk.thekevinwang.com",
   },
   "ai": {
     "binding": "AI",
-    "remote": true
+    "remote": true,
   },
   "vectorize": [
     {
       "binding": "MEMORIES",
       "index_name": "mcp-memory-qwen3",
-      "remote": true
-    }
+      "remote": true,
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "MEMORY_CATALOG",
+      "database_name": "mcp-memory-catalog",
+      "database_id": "e6627b59-3098-462c-8a85-d3d92c9fadeb",
+      "migrations_dir": "migrations",
+      "remote": true,
+    },
   ],
   "secrets": {
     "required": [
       "CLERK_SECRET_KEY",
       "CLERK_OAUTH_CLIENT_ID",
-      "CLERK_OAUTH_CLIENT_SECRET"
-    ]
-  }
+      "CLERK_OAUTH_CLIENT_SECRET",
+      "ADMIN_SESSION_SECRET",
+    ],
+  },
 }

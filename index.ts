@@ -5,8 +5,11 @@ import {
   McpServer,
   requireBearerAuth,
 } from "@modelcontextprotocol/server";
-import type { AuthInfo, OAuthTokenVerifier } from "@modelcontextprotocol/server";
-import type { Context } from "hono";
+import type {
+  AuthInfo,
+  OAuthTokenVerifier,
+} from "@modelcontextprotocol/server";
+import { Hono, type Context } from "hono";
 import * as z from "zod/v4";
 import {
   configure,
@@ -18,6 +21,7 @@ import {
 } from "@logtape/logtape";
 import { honoLogger } from "@logtape/hono";
 
+import { createAdminApp } from "./admin";
 import { createClerkTokenVerifier } from "./clerk-token-verifier";
 import {
   createCloudflareMemoryStore,
@@ -270,7 +274,12 @@ function requireClerkUserId(authInfo: AuthInfo | undefined) {
 }
 
 function createWorkerApp(env: Env) {
-  const app = createProtectedMcpApp({
+  const memoryStore = createCloudflareMemoryStore(
+    env.AI,
+    env.MEMORIES,
+    env.MEMORY_CATALOG,
+  );
+  const mcpApp = createProtectedMcpApp({
     clerkIssuer: env.CLERK_ISSUER,
     opaqueTokenClientId: env.CLERK_OAUTH_CLIENT_ID,
     opaqueTokenClientSecret: env.CLERK_OAUTH_CLIENT_SECRET,
@@ -278,9 +287,33 @@ function createWorkerApp(env: Env) {
     allowedUserId: env.ALLOWED_USER_ID,
     resourceUrl: env.MCP_RESOURCE_URL,
     allowedHosts: env.ALLOWED_HOSTS.split(",").map((host) => host.trim()),
-    memoryStore: createCloudflareMemoryStore(env.AI, env.MEMORIES),
+    memoryStore,
   });
+  const adminApp = createAdminApp({
+    clerkIssuer: env.CLERK_ISSUER,
+    clientId: env.CLERK_OAUTH_CLIENT_ID,
+    clientSecret: env.CLERK_OAUTH_CLIENT_SECRET,
+    clerkSecretKey: env.CLERK_SECRET_KEY,
+    sessionSecret: env.ADMIN_SESSION_SECRET,
+    allowedUserId: env.ALLOWED_USER_ID,
+    resourceUrl: env.MCP_RESOURCE_URL,
+    memoryStore,
+  });
+  const app = new Hono();
   app.use(honoLogger());
+  app.onError((error, c) => {
+    console.error(
+      JSON.stringify({
+        message: "unhandled_request_error",
+        method: c.req.method,
+        path: c.req.path,
+        error: error.message,
+      }),
+    );
+    return c.json({ error: "Internal server error" }, 500);
+  });
+  app.route("/", mcpApp);
+  app.route("/", adminApp);
   return app;
 }
 

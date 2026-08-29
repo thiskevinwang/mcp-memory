@@ -23,6 +23,9 @@ describe("Vector memory store", () => {
         async query() {
           return { matches: [], count: 0 };
         },
+        async deleteByIds() {
+          return { mutationId: "unused" };
+        },
       },
       now: () => createdAt,
       createId: () => "memory-123",
@@ -83,6 +86,9 @@ describe("Vector memory store", () => {
             ],
           };
         },
+        async deleteByIds() {
+          return { mutationId: "unused" };
+        },
       },
       now: () => createdAt,
     });
@@ -125,6 +131,9 @@ describe("Vector memory store", () => {
         },
         async query() {
           return { matches: [], count: 0 };
+        },
+        async deleteByIds() {
+          return { mutationId: "unused" };
         },
       },
       now: () => createdAt,
