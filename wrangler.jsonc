@@ -8,10 +8,25 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  "vars": {
+    "ALLOWED_EMAIL": "kwangsan@gmail.com",
+    "ALLOWED_HOSTS": "mcp-memory.thekevinwang.workers.dev,localhost,127.0.0.1",
+    "MCP_RESOURCE_URL": "https://mcp-memory.thekevinwang.workers.dev/mcp",
+    "CLERK_ISSUER": "https://clerk.thekevinwang.com"
+  },
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  },
+  "vectorize": [
+    {
+      "binding": "MEMORIES",
+      "index_name": "mcp-memory-qwen3",
+      "remote": true
+    }
+  ],
   "secrets": {
     "required": [
-      "CLERK_ISSUER",
-      "MCP_RESOURCE_URL",
       "CLERK_SECRET_KEY",
       "CLERK_OAUTH_CLIENT_ID",
       "CLERK_OAUTH_CLIENT_SECRET"
