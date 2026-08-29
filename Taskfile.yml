@@ -19,4 +19,4 @@ tasks:
   inspector:
     desc: Start the inspector for debugging
     cmds:
-      - bunx @modelcontextprotocol/inspector --url http://localhost:8787/mcp
+      - bunx @modelcontextprotocol/inspector http://localhost:8787/mcp

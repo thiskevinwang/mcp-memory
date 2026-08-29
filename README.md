@@ -1,6 +1,14 @@
 # mcp-memory
 
-This MCP 2.0 Streamable HTTP server is a Clerk OAuth protected resource.
+This MCP 2.0 Streamable HTTP server is a Clerk OAuth protected resource. It
+gives an agent two authenticated memory tools:
+
+- `remember` creates an embedding and persists the vector, original text, and
+  creation date.
+- `recall` embeds a natural-language query and returns the nearest memories.
+
+Memories use a SHA-256 digest of the Clerk user ID as the Vectorize namespace.
+One user cannot search another user's memories.
 
 ## Configure Clerk
 
@@ -17,6 +25,7 @@ file during `bun run dev`.
 ```sh
 CLERK_ISSUER=https://your-instance.clerk.accounts.dev
 MCP_RESOURCE_URL=http://localhost:8787/mcp
+CLERK_SECRET_KEY=your-clerk-secret-key
 
 # Required only when Clerk issues opaque OAuth access tokens.
 CLERK_OAUTH_CLIENT_ID=your-resource-server-client-id
@@ -24,6 +33,25 @@ CLERK_OAUTH_CLIENT_SECRET=your-resource-server-client-secret
 ```
 
 `CLERK_ISSUER` must be the exact `issuer` value from the Clerk authorization-server metadata. JWT tokens use that issuer's JWKS and RS256 signature. Their `aud` claim must equal `MCP_RESOURCE_URL`, and their `sub` claim must identify a Clerk user. Opaque tokens use `${CLERK_ISSUER}/oauth/token_info`; the response must be active, contain the same resource URL, and identify a Clerk user.
+
+## Create the Vectorize index
+
+The `@cf/qwen/qwen3-embedding-0.6b` Workers AI model produces
+1,024-dimensional embeddings. Create the index
+with the same dimensions and cosine distance:
+
+```sh
+bunx wrangler vectorize create mcp-memory-qwen3 --dimensions=1024 --metric=cosine
+bunx wrangler vectorize create-metadata-index mcp-memory-qwen3 \
+  --property-name=createdAtDay --type=number
+```
+
+The metadata index enables the optional `maxAgeDays` filter on `recall`. Create
+it before the first memory write. Vectorize applies writes asynchronously, so a
+new memory can take a short time to appear in similarity results.
+
+See Cloudflare's [Vectorize and Workers AI guide](https://developers.cloudflare.com/vectorize/get-started/embeddings/)
+for the binding and embedding flow.
 
 ## Run and test
 
