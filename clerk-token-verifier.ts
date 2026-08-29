@@ -30,6 +30,7 @@ export interface ClerkTokenVerifierOptions {
 interface ClerkIntrospectionResponse {
   active: boolean;
   client_id: string;
+  email?: string;
   iat: number;
   scope: string;
   sub: string;
@@ -37,6 +38,7 @@ interface ClerkIntrospectionResponse {
 
 interface ClerkBackendAccessTokenResponse {
   client_id: string;
+  email?: string;
   subject: string;
   scopes: string[];
   revoked: boolean;
@@ -193,7 +195,10 @@ async function verifyBackendAccessToken(
     scopes: result.scopes,
     expiresAt: result.expiration,
     resource: resourceUrl,
-    extra: { userId: result.subject },
+    extra: {
+      userId: result.subject,
+      ...(result.email ? { email: result.email } : {}),
+    },
   };
   logVerifiedToken("backend", issuer, authInfo);
   return authInfo;
@@ -353,7 +358,10 @@ function toAuthInfo(
     scopes: readScopes(claims.scope),
     expiresAt: expiresAt,
     resource,
-    extra: { userId },
+    extra: {
+      userId,
+      ...(typeof claims.email === "string" ? { email: claims.email } : {}),
+    },
   };
 }
 

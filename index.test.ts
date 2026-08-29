@@ -2,14 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createClerkTokenVerifier } from "./clerk-token-verifier";
 import { createProtectedMcpApp } from "./index";
+import type { MemoryStore } from "./memory-store";
 
 const app = createProtectedMcpApp({
   clerkIssuer: "https://clerk.clerk.com",
+  allowedEmail: "kwangsan@gmail.com",
   resourceUrl: "http://localhost:3000/mcp",
 });
 
 const appWithTokenWithoutScopes = createProtectedMcpApp({
   clerkIssuer: "https://clerk.clerk.com",
+  allowedEmail: "kwangsan@gmail.com",
   resourceUrl: "http://localhost:3000/mcp",
   tokenVerifier: {
     async verifyAccessToken(token) {
@@ -18,6 +21,80 @@ const appWithTokenWithoutScopes = createProtectedMcpApp({
         clientId: "dynamic-client",
         scopes: [],
         expiresAt: 4_102_444_800,
+      };
+    },
+  },
+});
+
+const persistedMemoryCalls: Array<{ userId: string; text: string }> = [];
+const recalledMemoryCalls: Array<{
+  userId: string;
+  query: string;
+  limit: number;
+  maxAgeDays?: number;
+}> = [];
+const memoryStore: MemoryStore = {
+  async persistMemory(userId, text) {
+    persistedMemoryCalls.push({ userId, text });
+    return {
+      id: "memory-123",
+      createdAt: "2026-08-28T12:34:56.000Z",
+    };
+  },
+  async recallMemories(userId, query, options) {
+    recalledMemoryCalls.push({ userId, query, ...options });
+    return [
+      {
+        id: "memory-123",
+        text: "The launch date is October 4.",
+        createdAt: "2026-08-28T12:34:56.000Z",
+        score: 0.92,
+      },
+    ];
+  },
+};
+const appWithMemoryTools = createProtectedMcpApp({
+  clerkIssuer: "https://clerk.clerk.com",
+  allowedEmail: "kwangsan@gmail.com",
+  resourceUrl: "http://localhost:3000/mcp",
+  memoryStore,
+  tokenVerifier: {
+    async verifyAccessToken(token) {
+      return {
+        token,
+        clientId: "dynamic-client",
+        scopes: [
+          "users:read",
+          "openid",
+          "profile",
+          "email",
+          "offline_access",
+        ],
+        expiresAt: 4_102_444_800,
+        extra: { userId: "user_123", email: "kwangsan@gmail.com" },
+      };
+    },
+  },
+});
+const appWithUnauthorizedEmail = createProtectedMcpApp({
+  clerkIssuer: "https://clerk.clerk.com",
+  allowedEmail: "kwangsan@gmail.com",
+  resourceUrl: "http://localhost:3000/mcp",
+  memoryStore,
+  tokenVerifier: {
+    async verifyAccessToken(token) {
+      return {
+        token,
+        clientId: "dynamic-client",
+        scopes: [
+          "users:read",
+          "openid",
+          "profile",
+          "email",
+          "offline_access",
+        ],
+        expiresAt: 4_102_444_800,
+        extra: { userId: "user_456", email: "other@example.com" },
       };
     },
   },
@@ -77,6 +154,147 @@ describe("MCP bearer authentication", () => {
       'error="insufficient_scope"',
     );
   });
+
+  test("runs the remember tool after Clerk JWT verification", async () => {
+    persistedMemoryCalls.length = 0;
+    const issuer = "https://clerk.clerk.com";
+    const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const jwk = await exportJWK(publicKey);
+    const token = await new SignJWT({
+      client_id: "dynamic-client",
+      scope: "users:read openid profile email offline_access",
+      email: "kwangsan@gmail.com",
+    })
+      .setProtectedHeader({ alg: "RS256", kid: "test-key" })
+      .setIssuer(issuer)
+      .setSubject("user_123")
+      .setExpirationTime("1h")
+      .sign(privateKey);
+    const jwtProtectedApp = createProtectedMcpApp({
+      clerkIssuer: issuer,
+      allowedEmail: "kwangsan@gmail.com",
+      resourceUrl: "http://localhost:3000/mcp",
+      memoryStore,
+      tokenVerifier: createClerkTokenVerifier({
+        issuer,
+        resourceUrl: "http://localhost:3000/mcp",
+        fetch: async () =>
+          Response.json({ keys: [{ ...jwk, kid: "test-key" }] }),
+      }),
+    });
+    const response = await jwtProtectedApp.request(
+      "http://localhost:3000/mcp",
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          Authorization: `Bearer ${token}`,
+          Host: "localhost:3000",
+          "Content-Type": "application/json",
+          "MCP-Protocol-Version": "2025-11-25",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "remember",
+            arguments: { text: "The launch date is October 4." },
+          },
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(persistedMemoryCalls).toEqual([
+      { userId: "user_123", text: "The launch date is October 4." },
+    ]);
+    const dataLine = (await response.text())
+      .split("\n")
+      .find((line) => line.startsWith("data: "));
+    expect(dataLine).toBeDefined();
+    expect<unknown>(JSON.parse(dataLine!.slice("data: ".length))).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        structuredContent: {
+          id: "memory-123",
+          createdAt: "2026-08-28T12:34:56.000Z",
+        },
+      },
+    });
+  });
+
+  test("passes the authenticated user to vector memory retrieval", async () => {
+    recalledMemoryCalls.length = 0;
+    const response = await appWithMemoryTools.request(
+      "http://localhost:3000/mcp",
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          Authorization: "Bearer valid-token",
+          Host: "localhost:3000",
+          "Content-Type": "application/json",
+          "MCP-Protocol-Version": "2025-11-25",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: {
+            name: "recall",
+            arguments: {
+              query: "When is launch?",
+              limit: 3,
+              maxAgeDays: 30,
+            },
+          },
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(recalledMemoryCalls).toEqual([
+      {
+        userId: "user_123",
+        query: "When is launch?",
+        limit: 3,
+        maxAgeDays: 30,
+      },
+    ]);
+    expect(await response.text()).toContain("The launch date is October 4.");
+  });
+
+  test("rejects an authenticated user with a different email", async () => {
+    persistedMemoryCalls.length = 0;
+    const response = await appWithUnauthorizedEmail.request(
+      "http://localhost:3000/mcp",
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          Authorization: "Bearer valid-token",
+          Host: "localhost:3000",
+          "Content-Type": "application/json",
+          "MCP-Protocol-Version": "2025-11-25",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: {
+            name: "remember",
+            arguments: { text: "This must not be stored." },
+          },
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect<unknown>(await response.json()).toEqual({ error: "Forbidden" });
+    expect(persistedMemoryCalls).toEqual([]);
+  });
 });
 
 describe("Clerk token verifier", () => {
@@ -126,6 +344,7 @@ describe("Clerk token verifier", () => {
           client_id: "dynamic-client",
           iat: 1_787_890_333,
           scope: "users:read users:create",
+          email: "kwangsan@gmail.com",
           sub: "user_123",
         });
       },
