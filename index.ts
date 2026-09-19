@@ -26,7 +26,6 @@ const gate = requireBearerAuth({
 const memoryStore = createCloudflareMemoryStore(
   env.AI,
   env.MEMORIES,
-  env.MEMORY_CATALOG,
 );
 
 const mcpHttpHandler = createMcpHandler(() => {

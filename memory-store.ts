@@ -144,101 +144,9 @@ export class VectorMemoryStore implements MemoryStore {
   }
 }
 
-interface D1BackedMemoryStoreOptions {
-  database: D1Database;
-  vectors: VectorMemoryStore;
-  now?: () => Date;
-  createId?: () => string;
-}
-
-export class D1BackedMemoryStore implements MemoryStore {
-  private readonly now: () => Date;
-  private readonly createId: () => string;
-
-  constructor(private readonly options: D1BackedMemoryStoreOptions) {
-    this.now = options.now ?? (() => new Date());
-    this.createId = options.createId ?? (() => crypto.randomUUID());
-  }
-
-  async persistMemory(userId: string, text: string): Promise<PersistedMemory> {
-    validateText("Memory text", text);
-    const id = this.createId();
-    const createdAt = this.now().toISOString();
-    await this.insertRecord(userId, id, text, createdAt);
-    try {
-      await this.options.vectors.upsertMemory(userId, id, text, createdAt);
-    } catch (error) {
-      await this.compensate(
-        () => this.deleteRecord(userId, id),
-        "persist_memory_compensation_failed",
-        id,
-      );
-      throw error;
-    }
-    return { id, createdAt };
-  }
-
-  recallMemories(
-    userId: string,
-    query: string,
-    options: RecallOptions,
-  ): Promise<RecalledMemory[]> {
-    return this.options.vectors.recallMemories(userId, query, options);
-  }
-
-  private async insertRecord(
-    userId: string,
-    id: string,
-    text: string,
-    createdAt: string,
-  ): Promise<void> {
-    await this.options.database
-      .prepare(
-        `INSERT INTO memories
-         (id, user_id, text, created_at, updated_at, relevance)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        id,
-        userId,
-        text,
-        createdAt,
-        createdAt,
-        null,
-      )
-      .run();
-  }
-
-  private async deleteRecord(userId: string, id: string): Promise<void> {
-    await this.options.database
-      .prepare("DELETE FROM memories WHERE id = ? AND user_id = ?")
-      .bind(id, userId)
-      .run();
-  }
-
-  private async compensate(
-    action: () => Promise<void>,
-    message: string,
-    id: string,
-  ): Promise<void> {
-    try {
-      await action();
-    } catch (error) {
-      console.error(
-        JSON.stringify({
-          message,
-          memoryId: id,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
-  }
-}
-
 export function createCloudflareMemoryStore(
   ai: Ai,
   index: Vectorize | VectorizeIndex,
-  database: D1Database,
 ): MemoryStore {
   const vectors = new VectorMemoryStore({
     index,
@@ -252,7 +160,7 @@ export function createCloudflareMemoryStore(
       return result.data[0];
     },
   });
-  return new D1BackedMemoryStore({ database, vectors });
+  return vectors;
 }
 
 async function createUserNamespace(userId: string): Promise<string> {
