@@ -47,6 +47,10 @@ const app = createMcpHonoApp({
   allowedHosts: env.ALLOWED_HOSTS,
 });
 
+app.get("/", (c) => {
+  return c.text("You're probably looking for /mcp");
+});
+
 // returns
 // - resource: <this server>
 // - authorization_servers: [<discovered from oauth metadata>]
