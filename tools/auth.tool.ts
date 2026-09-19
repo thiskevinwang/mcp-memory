@@ -8,7 +8,7 @@ export function registerAuthTools(server: McpServer) {
     {
       description: "Return details about the current access token.",
       inputSchema: z.object({
-        requireAuth: z.boolean(),
+        requireAuth: z.boolean().optional(),
       }),
       outputSchema: z.object({
         subject: z.string(),
