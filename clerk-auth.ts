@@ -1,5 +1,4 @@
 import { createClerkClient, type ClerkClient } from "@clerk/backend";
-import { fapiUrlFromPublishableKey } from "@clerk/backend/proxy";
 
 import {
   OAuthError,
@@ -17,7 +16,12 @@ interface Options {
 export class ClerkAuth implements OAuthTokenVerifier {
   private readonly clerk: ClerkClient;
   private readonly pk: string;
+
   constructor(options: Options) {
+    if (!options.publishableKey)
+      throw new Error("ClerkAuth: publishableKey is required");
+    if (!options.secretKey) throw new Error("ClerkAuth: secretKey is required");
+
     this.pk = options.publishableKey;
     this.clerk = createClerkClient({
       publishableKey: options.publishableKey,
@@ -26,7 +30,15 @@ export class ClerkAuth implements OAuthTokenVerifier {
   }
 
   get fapiURL() {
-    return fapiUrlFromPublishableKey(this.pk);
+    const encodedDomain = this.pk.split("_").at(-1);
+    if (!encodedDomain)
+      throw new Error("ClerkAuth.fapiURL: invalid publisahbleKey");
+    const domain = atob(encodedDomain);
+    if (!domain.endsWith("$"))
+      throw new Error(
+        "ClerkAuth.fapiURL: publisahbleKey decoded to invalid value",
+      );
+    return new URL(`https://${domain.slice(0, -1)}`);
   }
 
   metadata?: OAuthMetadata;

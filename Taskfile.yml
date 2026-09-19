@@ -2,21 +2,23 @@
 
 version: "3"
 
-vars:
-  GREETING: Hello, world!
-
 tasks:
-  default:
-    desc: Print a greeting message
-    cmds:
-      - echo "{{.GREETING}}"
-    silent: true
   dev:
     desc: Start the development server
     cmds:
       - bun run dev
     silent: true
-  inspector:
-    desc: Start the inspector for debugging
+  deploy:
+    cmds:
+      - bunx wrangler deploy
+  tail:
+    cmds:
+      - bunx wrangler tail
+  inspect:dev:
+    desc: Start the inspector for debugging the local dev mcp server
     cmds:
       - bunx @modelcontextprotocol/inspector http://localhost:8787/mcp
+  inspect:
+    desc: Start the inspector
+    cmds:
+      - bunx @modelcontextprotocol/inspector

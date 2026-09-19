@@ -13,6 +13,7 @@
     "ALLOWED_USER_ID": "user_2WmGvirCeic7h9XFQznaJXB4gkr",
     "ALLOWED_HOSTS": "mcp-memory.thekevinwang.workers.dev,localhost,127.0.0.1",
     "MCP_RESOURCE_URL": "https://mcp-memory.thekevinwang.workers.dev/mcp",
+    "CLERK_ISSUER": "https://clerk.thekevinwang.com",
     "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsudGhla2V2aW53YW5nLmNvbSQ",
   },
   "secrets": {
