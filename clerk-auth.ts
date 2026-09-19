@@ -44,9 +44,7 @@ export class ClerkAuth implements OAuthTokenVerifier {
   metadata?: OAuthMetadata;
   async getOAuthMetadata(): Promise<OAuthMetadata> {
     const url = new URL(".well-known/oauth-authorization-server", this.fapiURL);
-    console.log("fetching", url);
     this.metadata ??= await fetch(url).then((res) => res.json());
-    console.log("fetched", url);
     return this.metadata;
   }
 
@@ -63,6 +61,7 @@ export class ClerkAuth implements OAuthTokenVerifier {
         },
       };
     } catch (err) {
+      console.error("verifyAccessToken:", err);
       throw new OAuthError(OAuthErrorCode.InvalidToken, "Invalid access token");
     }
   }
