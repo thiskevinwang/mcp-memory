@@ -5,14 +5,21 @@ import {
   McpServer,
   requireBearerAuth,
   buildOAuthProtectedResourceMetadata,
+  getOAuthProtectedResourceMetadataUrl,
+  resourceUrlFromServerUrl,
+  type ClientRequest,
+  isJSONRPCRequest,
 } from "@modelcontextprotocol/server";
 import { createMcpHonoApp } from "@modelcontextprotocol/hono";
 
 import { ClerkAuth } from "@/clerk-auth";
-import { createCloudflareMemoryStore } from "@/memory-store";
+
+import { createCloudflareMemoryStore } from "@/tools/memory.store";
+import { registerAuthTools } from "@/tools/auth.tool";
 import { registerMemoryTools } from "@/tools/memory.tool";
 
-const resourceUrl = new URL(env.MCP_RESOURCE_URL);
+const resourceUrl = resourceUrlFromServerUrl(env.MCP_RESOURCE_URL);
+const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(resourceUrl);
 
 const clerkAuth = new ClerkAuth({
   publishableKey: env.CLERK_PUBLISHABLE_KEY,
@@ -21,24 +28,29 @@ const clerkAuth = new ClerkAuth({
 
 const gate = requireBearerAuth({
   verifier: clerkAuth,
+  resourceMetadataUrl,
 });
-
-const memoryStore = createCloudflareMemoryStore(
-  env.AI,
-  env.MEMORIES,
-);
 
 const mcpHttpHandler = createMcpHandler(() => {
   const server = new McpServer({ name: "mcp-memory", version: "1.0.0" });
+  // whoami
+  registerAuthTools(server);
+
+  // capture, recall
+  const memoryStore = createCloudflareMemoryStore(env.AI, env.MEMORIES);
   registerMemoryTools(server, memoryStore);
+
   return server;
 });
 
 const app = createMcpHonoApp({
-  allowedHosts: env.ALLOWED_HOSTS.split(","),
+  allowedHosts: env.ALLOWED_HOSTS,
 });
 
-app.all(".well-known/*", async (c) => {
+// returns
+// - resource: <this server>
+// - authorization_servers: [<discovered from oauth metadata>]
+app.get(".well-known/oauth-protected-resource/mcp", async (c) => {
   return c.json(
     buildOAuthProtectedResourceMetadata({
       resourceServerUrl: resourceUrl,
@@ -47,25 +59,49 @@ app.all(".well-known/*", async (c) => {
   );
 });
 
-app.all("/mcp", async (c) => {
-  const authInfo = await gate(c.req.raw);
+app.all(
+  "/mcp",
+  // handler
+  async (c) => {
+    // @ts-expect-error - createMcpHonoApp provides the `parsedBody` Hono variable.
+    const parsedBody = c.get("parsedBody") as ClientRequest;
+    if (!isJSONRPCRequest(parsedBody)) {
+      // invalid client requests shouldn't even be considered for auth
+      return c.json(
+        {
+          error: "invalid_client_request",
+          error_description: "Invalid client request",
+        },
+        422,
+      );
+    }
 
-  // authInfo is the challenge response
-  if (authInfo instanceof Response) return authInfo;
+    const authInfo = await gate(c.req.raw);
 
-  // authInfo is the resolved authInfo
-  return mcpHttpHandler.fetch(c.req.raw, {
-    // @ts-expect-error createMcpHonoApp provides the `parsedBody` hono var
-    // but the type is not correct.
-    parsedBody: c.get("parsedBody"),
-    authInfo: authInfo,
-  });
-});
+    if (authInfo instanceof Response) {
+      // this means no auth is present, and authInfo is a challenge
+      // but we can still let some "public" requests go through
+      if (isPublicRequest(parsedBody)) {
+        return mcpHttpHandler.fetch(c.req.raw, {
+          parsedBody,
+        });
+      }
+      return authInfo;
+    }
+
+    return mcpHttpHandler.fetch(c.req.raw, {
+      parsedBody,
+      authInfo: authInfo,
+    });
+  },
+);
 
 app.onError((err, c) => {
+  console.error(err);
   return c.json(
     {
-      error: "Unexpected error",
+      error: "unexpected_error",
+      error_description: "Unexpected error",
     },
     500,
   );
@@ -76,3 +112,31 @@ export default {
     return app.fetch(req, env, ctx);
   },
 } satisfies ExportedHandler<Env>;
+
+const publicClientMethods = [
+  "server/discover",
+  "subscriptions/listen",
+  "tools/list",
+] as ClientRequest["method"][];
+
+function isPublicRequest(request: ClientRequest) {
+  if (!isJSONRPCRequest(request)) {
+    return false;
+  }
+
+  // don't challenge methods that maybe don't need auth
+  if (publicClientMethods.includes(request.method)) {
+    return true;
+  }
+
+  // don't challenge tools that don't need auth
+  if (
+    request.method === "tools/call" &&
+    request.params.name === "whoami" &&
+    !request.params.arguments?.requireAuth
+  ) {
+    return true;
+  }
+
+  return false;
+}

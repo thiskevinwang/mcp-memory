@@ -6,7 +6,7 @@ import {
   MAX_MEMORY_TEXT_LENGTH,
   MAX_RECALL_RESULTS,
   type MemoryStore,
-} from "@/memory-store";
+} from "@/tools/memory.store";
 
 export function registerMemoryTools(
   server: McpServer,

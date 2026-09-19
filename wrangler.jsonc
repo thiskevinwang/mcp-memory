@@ -10,7 +10,7 @@
     "head_sampling_rate": 1,
   },
   "vars": {
-    "ALLOWED_HOSTS": "mcp-memory.thekevinwang.workers.dev,localhost,127.0.0.1",
+    "ALLOWED_HOSTS": ["mcp-memory.thekevinwang.workers.dev"],
     "MCP_RESOURCE_URL": "https://mcp-memory.thekevinwang.workers.dev/mcp",
     // Publishable Key is not sensitive
     "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsudGhla2V2aW53YW5nLmNvbSQ",

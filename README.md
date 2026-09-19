@@ -1,15 +1,25 @@
 # mcp-memory
 
-This is an MCP server built on `@modelcontextprotocol/server` V2.
+This is an MCP server built on [`@modelcontextprotocol/server` V2](https://ts.sdk.modelcontextprotocol.io/v2/)
+
+This MCP server allows certain unauthenticated operations, like discovery and tool listing, and won't immediately return an auth challenge.
 
 ## Tools
 
-This MCP server provides two tools:
+Listing the tools is a public action.
 
-- `recall`: recalls _memories_ in order similarity to a given input query
-- `capture`: persists a given input as a _memory_.
+Certain tools require auth, and will challenge the client.
 
-### Memory store
+| Tool | Requires Auth | Description | 
+| :--- | :--- | :--- |
+| `whoami` | ❌ | Displays info about the subject. Returns empty fields if not authenticated |
+| `recall` | ✅ | Recalls _memories_ in order similarity to a given input query |
+| `capture` | ✅ | Persists a given input as a _memory_. |
+
+
+### Memory
+
+This server implements a "memory" interface, but that is really secondary to the auth pieces of this project.
 
 This interface and implementation are 100% AI written, as I was not focused on this part of the code.
 
@@ -17,12 +27,12 @@ This interface and implementation are 100% AI written, as I was not focused on t
 
 This part of the code is 100% human written because:
 
-1. I wanted to land a super lean integration — something that could eventually be exported from `@clerk/mcp-tools`
-1. I ran out of Codex credits.
 1. I wanted to write this by band.
+1. I wanted to land a super lean integration — something felt _right_, to me as a human.
+1. I ran out of Codex credits.
 
-Authentication is powered by clerk.
+Authentication is powered by clerk. The token verifier implements [MCP's `OAuthTokenVerifier`.](https://ts.sdk.modelcontextprotocol.io/v2/serving/authorization.html#require-a-bearer-token)
 
-Any authorized user may use the provided tools.
+And as stated above, auth is _conditionally enforced_ across this MCP server.
 
-Data is namespaced by authenticated user id so there's no cross-user data access.
+Data is namespaced by authenticated user id.
