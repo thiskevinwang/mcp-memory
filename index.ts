@@ -1,97 +1,177 @@
-import { createMcpHonoApp } from "@modelcontextprotocol/hono";
+import { env } from "cloudflare:workers";
+
 import {
   createMcpHandler,
   getOAuthProtectedResourceMetadataUrl,
   McpServer,
   requireBearerAuth,
+  type AuthInfo,
+  buildOAuthProtectedResourceMetadata,
 } from "@modelcontextprotocol/server";
-import type { OAuthTokenVerifier } from "@modelcontextprotocol/server";
-import type { Context } from "hono";
+
+import { createMcpHonoApp } from "@modelcontextprotocol/hono";
 import * as z from "zod/v4";
 
-import { createClerkTokenVerifier } from "./clerk-token-verifier";
+import { ClerkAuth } from "./clerk-mcp";
+import {
+  createCloudflareMemoryStore,
+  MAX_MEMORY_TEXT_LENGTH,
+  MAX_RECALL_RESULTS,
+  type MemoryStore,
+} from "./memory-store";
 
-const supportedScopes = ["users:read", "users:create"];
+const resourceUrl = new URL(env.MCP_RESOURCE_URL);
 
-export interface McpAppConfig {
-  clerkIssuer: string;
-  opaqueTokenClientId?: string;
-  opaqueTokenClientSecret?: string;
-  resourceUrl: string;
-  tokenVerifier?: OAuthTokenVerifier;
-}
-
-export function createProtectedMcpApp(config: McpAppConfig) {
-  const resourceUrl = new URL(config.resourceUrl);
-  const authenticate = requireBearerAuth({
-    verifier:
-      config.tokenVerifier ??
-      createClerkTokenVerifier({
-        issuer: config.clerkIssuer,
-        opaqueTokenClientId: config.opaqueTokenClientId,
-        opaqueTokenClientSecret: config.opaqueTokenClientSecret,
-        resourceUrl: config.resourceUrl,
-      }),
-    requiredScopes: ["users:read"],
-    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceUrl),
-  });
-  const handler = createMcpHandler(() => {
-    const server = new McpServer({ name: "notes", version: "1.0.0" });
-    server.registerTool(
-      "add-note",
-      {
-        description: "Append a note",
-        inputSchema: z.object({ text: z.string() }),
-      },
-      async ({ text }) => ({
-        content: [{ type: "text", text: `Saved: ${text}` }],
-      }),
-    );
-    return server;
-  });
-
-  const app = createMcpHonoApp({
-    allowedHosts: [resourceUrl.hostname],
-    allowedOrigins: [resourceUrl.hostname],
-  });
-  app.get("/.well-known/oauth-protected-resource/mcp", (c) =>
-    c.json({
-      resource: config.resourceUrl,
-      authorization_servers: [config.clerkIssuer],
-      bearer_methods_supported: ["header"],
-      scopes_supported: supportedScopes,
-    }),
-  );
-  app.all("/mcp", async (c: Context) => {
-    const authInfo = await authenticate(c.req.raw);
-    if (authInfo instanceof Response) {
-      return authInfo;
-    }
-
-    return handler.fetch(c.req.raw, {
-      authInfo,
-      parsedBody: c.get("parsedBody"),
-    });
-  });
-
-  return app;
-}
-
-const app = createProtectedMcpApp({
-  clerkIssuer: process.env.CLERK_ISSUER ?? "https://clerk.clerk.com",
-  opaqueTokenClientId: process.env.CLERK_OAUTH_CLIENT_ID,
-  opaqueTokenClientSecret: process.env.CLERK_OAUTH_CLIENT_SECRET,
-  resourceUrl: process.env.MCP_RESOURCE_URL ?? "http://localhost:3000/mcp",
+const clerkAuth = new ClerkAuth({
+  publishableKey: env.CLERK_PUBLISHABLE_KEY,
+  secretKey: env.CLERK_SECRET_KEY,
 });
 
-if (import.meta.main) {
-  const port = Number(process.env.MCP_PORT ?? 3000);
-  Bun.serve({
-    fetch: app.fetch,
-    hostname: "127.0.0.1",
-    port,
-  });
-  console.log(`MCP server listening at http://localhost:${port}/mcp`);
+const gate = requireBearerAuth({
+  verifier: clerkAuth,
+  resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceUrl),
+});
+
+function registerMemoryTools(server: McpServer, memoryStore: MemoryStore) {
+  server.registerTool(
+    "capture",
+    {
+      description: "Persist text as a dated memory for the authenticated user.",
+      inputSchema: z.object({
+        text: z
+          .string()
+          .min(1)
+          .max(MAX_MEMORY_TEXT_LENGTH)
+          .describe("Original memory text to persist"),
+      }),
+      outputSchema: z.object({
+        id: z.string(),
+        createdAt: z.string(),
+      }),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ text }, ctx) => {
+      const memory = await memoryStore.persistMemory(
+        requireClerkUserId(ctx.http?.authInfo),
+        text,
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(memory) }],
+        structuredContent: memory,
+      };
+    },
+  );
+
+  server.registerTool(
+    "recall",
+    {
+      description:
+        "Find memories for the authenticated user. Returns original text, creation date, and similarity score.",
+      inputSchema: z.object({
+        query: z
+          .string()
+          .min(1)
+          .max(MAX_MEMORY_TEXT_LENGTH)
+          .describe("Natural-language similarity query"),
+        limit: z.number().int().min(1).max(MAX_RECALL_RESULTS).default(5),
+        maxAgeDays: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("Only return memories from this many recent days"),
+      }),
+      outputSchema: z.object({
+        memories: z.array(
+          z.object({
+            id: z.string(),
+            text: z.string(),
+            createdAt: z.string(),
+            score: z.number(),
+          }),
+        ),
+      }),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ query, limit, maxAgeDays }, ctx) => {
+      const memories = await memoryStore.recallMemories(
+        requireClerkUserId(ctx.http?.authInfo),
+        query,
+        { limit, maxAgeDays },
+      );
+      const result = { memories };
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
 }
 
-export default app;
+function requireClerkUserId(authInfo: AuthInfo | undefined) {
+  const userId = authInfo?.extra?.userId;
+  if (typeof userId !== "string" || !userId) {
+    throw new Error("Authenticated Clerk user ID is required");
+  }
+  return userId;
+}
+
+const memoryStore = createCloudflareMemoryStore(
+  env.AI,
+  env.MEMORIES,
+  env.MEMORY_CATALOG,
+);
+
+const mcpHttpHandler = createMcpHandler(() => {
+  const server = new McpServer({ name: "mcp-memory", version: "1.0.0" });
+  registerMemoryTools(server, memoryStore);
+  return server;
+});
+
+const app = createMcpHonoApp({
+  allowedHosts: env.ALLOWED_HOSTS.split(","),
+});
+
+app.all(".well-known/*", async (c) => {
+  return c.json(
+    buildOAuthProtectedResourceMetadata({
+      resourceServerUrl: resourceUrl,
+      oauthMetadata: await clerkAuth.getOAuthMetadata(),
+    }),
+  );
+});
+
+app.all("/mcp", async (c) => {
+  const authInfo = await gate(c.req.raw);
+  if (authInfo instanceof Response) return authInfo;
+
+  return mcpHttpHandler.fetch(c.req.raw, {
+    parsedBody: c.get("parsedBody"),
+    authInfo: authInfo,
+  });
+});
+app.onError((err, c) => {
+  console.error(err);
+  return c.json(
+    {
+      error: err,
+    },
+    500,
+  );
+});
+
+export default {
+  fetch(req, env, ctx) {
+    return app.fetch(req, env, ctx);
+  },
+} satisfies ExportedHandler<Env>;

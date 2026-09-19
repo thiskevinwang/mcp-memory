@@ -1,8 +1,12 @@
 {
   "compilerOptions": {
+    "jsx": "react-jsx",
     "module": "preserve",
     "moduleResolution": "bundler",
     "noEmit": true,
+    "paths": {
+      "@/*": ["./*"]
+    },
     "skipLibCheck": true,
     "strict": true,
     "target": "ES2022",
