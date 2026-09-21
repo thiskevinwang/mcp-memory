@@ -27,12 +27,12 @@ This interface and implementation are 100% AI written, as I was not focused on t
 
 This part of the code is 100% human written because:
 
-1. I wanted to write this by band.
-1. I wanted to land a super lean integration — something felt _right_, to me as a human.
+1. I wanted to write this by hand.
+1. I wanted to land on a super lean integration — something that felt _right_, to me as a human.
 1. I ran out of Codex credits.
 
 Authentication is powered by clerk. The token verifier implements [MCP's `OAuthTokenVerifier`.](https://ts.sdk.modelcontextprotocol.io/v2/serving/authorization.html#require-a-bearer-token)
 
-And as stated above, auth is _conditionally enforced_ across this MCP server.
+And as stated above, auth is _conditionally enforced_ across this MCP server. See the access control list (ACL) in [acl.ts](./acl.ts) for access policy.
 
 Data is namespaced by authenticated user id.

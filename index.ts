@@ -17,6 +17,7 @@ import { ClerkAuth } from "@/clerk-auth";
 import { createCloudflareMemoryStore } from "@/tools/memory.store";
 import { registerAuthTools } from "@/tools/auth.tool";
 import { registerMemoryTools } from "@/tools/memory.tool";
+import { isPublicRequest, acl } from "@/acl";
 
 const resourceUrl = resourceUrlFromServerUrl(env.MCP_RESOURCE_URL);
 const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(resourceUrl);
@@ -85,7 +86,7 @@ app.all(
     if (authInfo instanceof Response) {
       // this means no auth is present, and authInfo is a challenge
       // but we can still let some "public" requests go through
-      if (isPublicRequest(parsedBody)) {
+      if (isPublicRequest(parsedBody, acl)) {
         return mcpHttpHandler.fetch(c.req.raw, {
           parsedBody,
         });
@@ -116,31 +117,3 @@ export default {
     return app.fetch(req, env, ctx);
   },
 } satisfies ExportedHandler<Env>;
-
-const publicClientMethods = [
-  "server/discover",
-  "subscriptions/listen",
-  "tools/list",
-] as ClientRequest["method"][];
-
-function isPublicRequest(request: ClientRequest) {
-  if (!isJSONRPCRequest(request)) {
-    return false;
-  }
-
-  // don't challenge methods that maybe don't need auth
-  if (publicClientMethods.includes(request.method)) {
-    return true;
-  }
-
-  // don't challenge tools that don't need auth
-  if (
-    request.method === "tools/call" &&
-    request.params.name === "whoami" &&
-    !request.params.arguments?.requireAuth
-  ) {
-    return true;
-  }
-
-  return false;
-}
